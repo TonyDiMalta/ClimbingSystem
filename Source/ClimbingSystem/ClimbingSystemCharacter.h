@@ -6,11 +6,11 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Character.h"
-#include "CSCharacter.generated.h"
+#include "ClimbingSystemCharacter.generated.h"
 
 class UMyCharacterMovementComponent;
 UCLASS(config=Game)
-class ACSCharacter : public ACharacter
+class AClimbingSystemCharacter : public ACharacter
 {
 	GENERATED_BODY()
 	
@@ -24,7 +24,7 @@ class ACSCharacter : public ACharacter
 	FORCEINLINE UMyCharacterMovementComponent* GetCustomCharacterMovement() const { return MovementComponent; }
 	
 public:
-	ACSCharacter(const FObjectInitializer& ObjectInitializer);
+	AClimbingSystemCharacter(const FObjectInitializer& ObjectInitializer);
 	
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category=Input)
 	float TurnRateGamepad;

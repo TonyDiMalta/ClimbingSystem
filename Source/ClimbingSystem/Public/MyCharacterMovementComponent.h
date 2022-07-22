@@ -5,7 +5,7 @@
 #include "MyCharacterMovementComponent.generated.h"
 
 UCLASS()
-class CS_API UMyCharacterMovementComponent : public UCharacterMovementComponent
+class CLIMBINGSYSTEM_API UMyCharacterMovementComponent : public UCharacterMovementComponent
 {
 	GENERATED_BODY()
 	
