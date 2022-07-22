@@ -10,7 +10,7 @@ class CLIMBINGSYSTEM_API UMyCharacterMovementComponent : public UCharacterMoveme
 	GENERATED_BODY()
 	
 public:
-	UMyCharacterMovementComponent(const FObjectInitializer& ObjectInitializer);
+	UMyCharacterMovementComponent(const FObjectInitializer& objectInitializer);
 
 	UFUNCTION(BlueprintPure)
 	bool IsClimbing() const;
@@ -95,29 +95,29 @@ private:
 private:
 	virtual void BeginPlay() override;
 
-	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+	virtual void TickComponent(float deltaTime, ELevelTick tickType, FActorComponentTickFunction* thisTickFunction) override;
 
-	virtual void OnMovementUpdated(float DeltaSeconds, const FVector& OldLocation, const FVector& OldVelocity) override;
+	virtual void OnMovementUpdated(float deltaTime, const FVector& oldLocation, const FVector& oldVelocity) override;
 	
-	virtual void OnMovementModeChanged(EMovementMode PreviousMovementMode, uint8 PreviousCustomMode) override;
+	virtual void OnMovementModeChanged(EMovementMode previousMovementMode, uint8 previousCustomMode) override;
 	
 	virtual float GetMaxSpeed() const override;
 	
 	virtual float GetMaxAcceleration() const override;
 	
-	virtual void PhysCustom(float deltaTime, int32 Iterations) override;
+	virtual void PhysCustom(float deltaTime, int32 iterations) override;
 	
 	void UpdateClimbDashState(float deltaTime);
 
-	void PhysClimbing(float deltaTime, int32 Iterations);
+	void PhysClimbing(float deltaTime, int32 iterations);
 	
-	bool EyeHeightTrace(const float TraceDistance) const;
+	bool EyeHeightTrace(const float traceDistance) const;
 	
 	bool ShouldStopClimbing() const;
 	
 	bool ClimbDownToFloor() const;
 	
-	bool CheckFloor(FHitResult& FloorHit) const;
+	bool CheckFloor(FHitResult& floorHit) const;
 	
 	void SetRotationToStand() const;
 	
@@ -125,17 +125,17 @@ private:
 	
 	bool HasReachedEdge() const;
 	
-	bool IsLocationWalkable(const FVector& CheckLocation) const;
+	bool IsLocationWalkable(const FVector& checkLocation) const;
 	
 	bool CanMoveToLedgeClimbLocation() const;
 
 	bool CanStartClimbing();
 	
-	bool IsFacingSurface(float Steepness) const;
+	bool IsFacingSurface(float steepness) const;
 
 	FQuat GetClimbingRotation(float deltaTime) const;
 	
-	void StopClimbing(float deltaTime, int32 Iterations);
+	void StopClimbing(float deltaTime, int32 iterations);
 	
 	void AlignClimbDashDirection();
 

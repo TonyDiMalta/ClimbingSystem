@@ -1,7 +1,5 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
-// Base Character from UE5 Third Person Template
-
 #include "ClimbingSystemCharacter.h"
 
 #include "Public/MyCharacterMovementComponent.h"
@@ -15,8 +13,8 @@
 //////////////////////////////////////////////////////////////////////////
 // AClimbingSystemCharacter
 
-AClimbingSystemCharacter::AClimbingSystemCharacter(const FObjectInitializer& ObjectInitializer)
-	: Super(ObjectInitializer.SetDefaultSubobjectClass<UMyCharacterMovementComponent>(ACharacter::CharacterMovementComponentName))
+AClimbingSystemCharacter::AClimbingSystemCharacter(const FObjectInitializer& objectInitializer)
+	: Super(objectInitializer.SetDefaultSubobjectClass<UMyCharacterMovementComponent>(ACharacter::CharacterMovementComponentName))
 {
 	GetCapsuleComponent()->InitCapsuleSize(42.f, 96.0f);
 	
@@ -44,27 +42,26 @@ AClimbingSystemCharacter::AClimbingSystemCharacter(const FObjectInitializer& Obj
 	FollowCamera->SetupAttachment(CameraBoom, USpringArmComponent::SocketName);
 	FollowCamera->bUsePawnControlRotation = false;
 
-	MovementComponent = Cast<UMyCharacterMovementComponent>(GetCharacterMovement()); // <--
+	MovementComponent = Cast<UMyCharacterMovementComponent>(GetCharacterMovement());
 }
 
-void AClimbingSystemCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
+void AClimbingSystemCharacter::SetupPlayerInputComponent(UInputComponent* playerInputComponent)
 {
 	// Set up gameplay key bindings
-	check(PlayerInputComponent);
-	PlayerInputComponent->BindAction("Jump", IE_Pressed, this, &ACharacter::Jump);
-	PlayerInputComponent->BindAction("Jump", IE_Released, this, &ACharacter::StopJumping);
+	check(playerInputComponent);
+	playerInputComponent->BindAction("Jump", IE_Pressed, this, &ThisClass::Jump);
+	playerInputComponent->BindAction("Jump", IE_Released, this, &ThisClass::StopJumping);
 
-	PlayerInputComponent->BindAction("Climb", IE_Pressed, this, &AClimbingSystemCharacter::Climb);
-	PlayerInputComponent->BindAction("Cancel Climb", IE_Released, this, &AClimbingSystemCharacter::CancelClimb);
+	playerInputComponent->BindAction("Climb", IE_Pressed, this, &ThisClass::Climb);
+	playerInputComponent->BindAction("Cancel Climb", IE_Released, this, &ThisClass::CancelClimb);
 
-	PlayerInputComponent->BindAxis("Move Forward / Backward", this, &AClimbingSystemCharacter::MoveForward);
-	PlayerInputComponent->BindAxis("Move Right / Left", this, &AClimbingSystemCharacter::MoveRight);
+	playerInputComponent->BindAxis("Move Forward / Backward", this, &ThisClass::MoveForward);
+	playerInputComponent->BindAxis("Move Right / Left", this, &ThisClass::MoveRight);
 
-
-	PlayerInputComponent->BindAxis("Turn Right / Left Mouse", this, &APawn::AddControllerYawInput);
-	PlayerInputComponent->BindAxis("Turn Right / Left Gamepad", this, &AClimbingSystemCharacter::TurnAtRate);
-	PlayerInputComponent->BindAxis("Look Up / Down Mouse", this, &APawn::AddControllerPitchInput);
-	PlayerInputComponent->BindAxis("Look Up / Down Gamepad", this, &AClimbingSystemCharacter::LookUpAtRate);
+	playerInputComponent->BindAxis("Turn Right / Left Mouse", this, &ThisClass::AddControllerYawInput);
+	playerInputComponent->BindAxis("Turn Right / Left Gamepad", this, &ThisClass::TurnAtRate);
+	playerInputComponent->BindAxis("Look Up / Down Mouse", this, &ThisClass::AddControllerPitchInput);
+	playerInputComponent->BindAxis("Look Up / Down Gamepad", this, &ThisClass::LookUpAtRate);
 }
 
 void AClimbingSystemCharacter::Climb()
@@ -77,53 +74,52 @@ void AClimbingSystemCharacter::CancelClimb()
 	MovementComponent->CancelClimbing();
 }
 
-void AClimbingSystemCharacter::MoveForward(float Value)
+void AClimbingSystemCharacter::MoveForward(float value)
 {
-	if (Controller == nullptr || Value == 0.0f)
+	if (Controller == nullptr || value == 0.0f)
 	{
 		return;
 	}
 
-	FVector Direction;
-	
+	FVector direction;
 	if (MovementComponent->IsClimbing())
 	{
-		Direction = FVector::CrossProduct(MovementComponent->GetClimbSurfaceNormal(), -GetActorRightVector());
+		direction = FVector::CrossProduct(MovementComponent->GetClimbSurfaceNormal(), -GetActorRightVector());
 	}
 	else
 	{
-		Direction = GetControlOrientationMatrix().GetUnitAxis(EAxis::X);
+		direction = GetControlOrientationMatrix().GetUnitAxis(EAxis::X);
 	}
 	
-	AddMovementInput(Direction, Value);
+	AddMovementInput(direction, value);
 }
 
-void AClimbingSystemCharacter::MoveRight(float Value)
+void AClimbingSystemCharacter::MoveRight(float value)
 {
-	if (Controller == nullptr || Value == 0.0f)
+	if (Controller == nullptr || value == 0.0f)
 	{
 		return;
 	}
 
-	FVector Direction;
+	FVector direction;
 	if (MovementComponent->IsClimbing())
 	{
-		Direction = FVector::CrossProduct(MovementComponent->GetClimbSurfaceNormal(), GetActorUpVector());
+		direction = FVector::CrossProduct(MovementComponent->GetClimbSurfaceNormal(), GetActorUpVector());
 	}
 	else
 	{
-		Direction = GetControlOrientationMatrix().GetUnitAxis(EAxis::Y);
+		direction = GetControlOrientationMatrix().GetUnitAxis(EAxis::Y);
 	}
 	
-	AddMovementInput(Direction, Value);
+	AddMovementInput(direction, value);
 }
 
 FRotationMatrix AClimbingSystemCharacter::GetControlOrientationMatrix() const
 {
-	const FRotator Rotation = Controller->GetControlRotation();
-	const FRotator YawRotation(0, Rotation.Yaw, 0);
+	const FRotator rotation = Controller->GetControlRotation();
+	const FRotator yawRotation(0, rotation.Yaw, 0);
 
-	return FRotationMatrix(YawRotation);
+	return FRotationMatrix(yawRotation);
 }
 
 void AClimbingSystemCharacter::Jump()
@@ -138,14 +134,14 @@ void AClimbingSystemCharacter::Jump()
 	}
 }
 
-void AClimbingSystemCharacter::TurnAtRate(float Rate)
+void AClimbingSystemCharacter::TurnAtRate(float rate)
 {
 	// calculate delta for this frame from the rate information
-	AddControllerYawInput(Rate * TurnRateGamepad * GetWorld()->GetDeltaSeconds());
+	AddControllerYawInput(rate * TurnRateGamepad * GetWorld()->GetDeltaSeconds());
 }
 
-void AClimbingSystemCharacter::LookUpAtRate(float Rate)
+void AClimbingSystemCharacter::LookUpAtRate(float rate)
 {
 	// calculate delta for this frame from the rate information
-	AddControllerPitchInput(Rate * TurnRateGamepad * GetWorld()->GetDeltaSeconds());
+	AddControllerPitchInput(rate * TurnRateGamepad * GetWorld()->GetDeltaSeconds());
 }

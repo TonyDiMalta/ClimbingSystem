@@ -1,7 +1,5 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
-// Base Character from UE5 Third Person Template
-
 #pragma once
 
 #include "CoreMinimal.h"
@@ -24,7 +22,7 @@ class AClimbingSystemCharacter : public ACharacter
 	FORCEINLINE UMyCharacterMovementComponent* GetCustomCharacterMovement() const { return MovementComponent; }
 	
 public:
-	AClimbingSystemCharacter(const FObjectInitializer& ObjectInitializer);
+	AClimbingSystemCharacter(const FObjectInitializer& objectInitializer);
 	
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category=Input)
 	float TurnRateGamepad;
@@ -38,20 +36,20 @@ protected:
 
 	void CancelClimb();
 	
-	void MoveForward(float Value);
+	void MoveForward(float value);
 	
-	void MoveRight(float Value);
+	void MoveRight(float value);
 	
 	FRotationMatrix GetControlOrientationMatrix() const;
 
 	virtual void Jump() override;
 	
-	void TurnAtRate(float Rate);
+	void TurnAtRate(float rate);
 	
-	void LookUpAtRate(float Rate);
+	void LookUpAtRate(float rate);
 
 protected:
-	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
+	virtual void SetupPlayerInputComponent(class UInputComponent* playerInputComponent) override;
 
 public:
 	FORCEINLINE class USpringArmComponent* GetCameraBoom() const { return CameraBoom; }
