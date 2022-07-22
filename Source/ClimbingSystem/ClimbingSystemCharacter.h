@@ -6,53 +6,65 @@
 #include "GameFramework/Character.h"
 #include "ClimbingSystemCharacter.generated.h"
 
-class UMyCharacterMovementComponent;
 UCLASS(config=Game)
 class AClimbingSystemCharacter : public ACharacter
 {
-	GENERATED_BODY()
-	
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = Camera, meta = (AllowPrivateAccess = "true"))
-	class USpringArmComponent* CameraBoom;
+	GENERATED_UCLASS_BODY()
 
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = Camera, meta = (AllowPrivateAccess = "true"))
-	class UCameraComponent* FollowCamera;
-
-	UFUNCTION(BlueprintPure)
-	FORCEINLINE UMyCharacterMovementComponent* GetCustomCharacterMovement() const { return MovementComponent; }
-	
 public:
-	AClimbingSystemCharacter(const FObjectInitializer& objectInitializer);
-	
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category=Input)
-	float TurnRateGamepad;
+	/** Dash if currently climbing, otherwise jump. */
+	void Jump() override;
+
+	/** Start to climb or cancel it depending on its current state. */
+	virtual void Climb();
+
+	/** Returns CameraBoom subobject **/
+	FORCEINLINE class USpringArmComponent* GetCameraBoom() const { return CameraBoom; }
+
+	/** Returns FollowCamera subobject **/
+	FORCEINLINE class UCameraComponent* GetFollowCamera() const { return FollowCamera; }
+
+	/** Returns MovementComponent subobject **/
+	UFUNCTION(BlueprintPure)
+		FORCEINLINE class UMyCharacterMovementComponent* GetMyCharacterMovement() const { return MovementComponent; }
+
+protected:
+	/** Called for forwards/backward input */
+	void MoveForward(float value);
+
+	/** Called for side to side input */
+	void MoveRight(float value);
+
+	/** 
+	 * Called via input to turn at a given rate. 
+	 * @param Rate	This is a normalized rate, i.e. 1.0 means 100% of desired turn rate
+	 */
+	void TurnAtRate(float rate);
+
+	/**
+	 * Called via input to turn look up/down at a given rate. 
+	 * @param Rate	This is a normalized rate, i.e. 1.0 means 100% of desired turn rate
+	 */
+	void LookUpAtRate(float rate);
+
+	// APawn interface
+	virtual void SetupPlayerInputComponent(class UInputComponent* playerInputComponent) override;
+	// End of APawn interface
 
 private:
 	UPROPERTY()
-	UMyCharacterMovementComponent* MovementComponent;
+	class UMyCharacterMovementComponent* MovementComponent;
 
-protected:
-	void Climb();
+	/** Camera boom positioning the camera behind the character */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = Camera, meta = (AllowPrivateAccess = "true"))
+		class USpringArmComponent* CameraBoom;
 
-	void CancelClimb();
-	
-	void MoveForward(float value);
-	
-	void MoveRight(float value);
-	
-	FRotationMatrix GetControlOrientationMatrix() const;
+	/** Follow camera */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = Camera, meta = (AllowPrivateAccess = "true"))
+		class UCameraComponent* FollowCamera;
 
-	virtual void Jump() override;
-	
-	void TurnAtRate(float rate);
-	
-	void LookUpAtRate(float rate);
+	/** Base turn rate, in deg/sec. Other scaling may affect final turn rate. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = Input, meta = (AllowPrivateAccess = "true"))
+		float TurnRateGamepad;
 
-protected:
-	virtual void SetupPlayerInputComponent(class UInputComponent* playerInputComponent) override;
-
-public:
-	FORCEINLINE class USpringArmComponent* GetCameraBoom() const { return CameraBoom; }
-	FORCEINLINE class UCameraComponent* GetFollowCamera() const { return FollowCamera; }
 };
-

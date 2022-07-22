@@ -4,19 +4,19 @@
 #include "Components/CapsuleComponent.h"
 #include "GameFramework/Character.h"
 
-
-UMyCharacterMovementComponent::UMyCharacterMovementComponent(const FObjectInitializer& objectInitializer)
-	: Super(objectInitializer)
-{
-}
-
 void UMyCharacterMovementComponent::BeginPlay()
 {
 	Super::BeginPlay();
 
 	AnimInstance = GetCharacterOwner()->GetMesh()->GetAnimInstance();
-	
+
 	ClimbQueryParams.AddIgnoredActor(GetOwner());
+
+	if (ClimbDashCurve)
+	{
+		float minTime;
+		ClimbDashCurve->GetTimeRange(minTime, ClimbDashDuration);
+	}
 }
 
 void UMyCharacterMovementComponent::TickComponent(float deltaTime, ELevelTick tickType, FActorComponentTickFunction* thisTickFunction)
@@ -30,15 +30,20 @@ void UMyCharacterMovementComponent::SweepAndStoreWallHits()
 {
 	const FCollisionShape collisionShape = FCollisionShape::MakeCapsule(CollisionCapsuleRadius, CollisionCapsuleHalfHeight);
 
-	const FVector startOffset = UpdatedComponent->GetForwardVector() * 20;
+	const FVector startOffset = UpdatedComponent->GetForwardVector() * DistanceFromSurface;
+	const FVector endOffset = (CurrentClimbingNormal.IsZero() ? UpdatedComponent->GetForwardVector() : -CurrentClimbingNormal) * FMath::Max(CollisionCapsuleRadius, CollisionCapsuleHalfHeight);
 
-	// Avoid using the same Start/End location for a Sweep, as it doesn't trigger hits on Landscapes.
+	// Avoid using the same start/end location for a Sweep, as it doesn't trigger hits on Landscapes or stick to walls past ramps.
 	const FVector start = UpdatedComponent->GetComponentLocation() + startOffset;
-	const FVector end = start + UpdatedComponent->GetForwardVector();
+	const FVector end = start + endOffset;
 
 	TArray<FHitResult> hits;
 	const bool hitWall = GetWorld()->SweepMultiByChannel(hits, start, end, FQuat::Identity,
-		  ECC_WorldStatic, collisionShape, ClimbQueryParams);
+		ECC_WorldStatic, collisionShape, ClimbQueryParams);
+
+#if 0
+	DrawDebugCapsule(GetWorld(), start, collisionShape.GetCapsuleHalfHeight(), collisionShape.GetCapsuleRadius(), UpdatedComponent->GetComponentQuat(), FColor::Emerald, false, -1.0f, 0U, 2.f);
+#endif
 
 	hitWall ? CurrentWallHits = hits : CurrentWallHits.Reset();
 }
@@ -55,9 +60,10 @@ bool UMyCharacterMovementComponent::CanStartClimbing()
 		const float horizontalDegrees = FMath::RadiansToDegrees(FMath::Acos(horizontalDot));
 
 		const bool isCeiling = FMath::IsNearlyZero(verticalDot);
-		
+		const bool onWalkableFloor = IsWalkable(hit);
+
 		if (horizontalDegrees <= MinHorizontalDegreesToStartClimbing &&
-			isCeiling == false && IsFacingSurface(verticalDot))
+			isCeiling == false && onWalkableFloor == false && IsFacingSurface(verticalDot))
 		{
 			return true;
 		}
@@ -70,21 +76,20 @@ bool UMyCharacterMovementComponent::IsFacingSurface(const float steepness) const
 {
 	constexpr float baseLength = 80;
 	const float steepnessMultiplier = 1 + (1 - steepness) * 5;
-	
-	return EyeHeightTrace(baseLength * steepnessMultiplier);
+
+	FHitResult surfaceHit;
+	return EyeHeightTrace(surfaceHit, baseLength * steepnessMultiplier);
 }
 
-bool UMyCharacterMovementComponent::EyeHeightTrace(const float traceDistance) const
+bool UMyCharacterMovementComponent::EyeHeightTrace(FHitResult& outHit, const float traceDistance, const float heightOffset) const
 {
-	FHitResult upperEdgeHit;
+	const float baseEyeHeight = CharacterOwner->BaseEyeHeight;
+	const float eyeHeightOffset = IsClimbing() ? baseEyeHeight + ClimbingCollisionShrinkAmount + heightOffset : baseEyeHeight;
 
-	const float baseEyeHeight = GetCharacterOwner()->BaseEyeHeight;
-	const float eyeHeightOffset = IsClimbing() ? baseEyeHeight + ClimbingCollisionShrinkAmount : baseEyeHeight;
-	
 	const FVector start = UpdatedComponent->GetComponentLocation() + UpdatedComponent->GetUpVector() * eyeHeightOffset;
 	const FVector end = start + (UpdatedComponent->GetForwardVector() * traceDistance);
 
-	return GetWorld()->LineTraceSingleByChannel(upperEdgeHit, start, end, ECC_WorldStatic, ClimbQueryParams);
+	return GetWorld()->LineTraceSingleByChannel(outHit, start, end, ECC_WorldStatic, ClimbQueryParams);
 }
 
 void UMyCharacterMovementComponent::OnMovementUpdated(float deltaTime, const FVector& oldLocation, const FVector& oldVelocity)
@@ -102,13 +107,13 @@ void UMyCharacterMovementComponent::OnMovementModeChanged(EMovementMode previous
 	if (IsClimbing())
 	{
 		bOrientRotationToMovement = false;
-	
+
 		UCapsuleComponent* capsule = CharacterOwner->GetCapsuleComponent();
 		capsule->SetCapsuleHalfHeight(capsule->GetUnscaledCapsuleHalfHeight() - ClimbingCollisionShrinkAmount);
 	}
 
-	const bool bWasClimbing = previousMovementMode == MOVE_Custom && previousCustomMode == CMOVE_Climbing;
-	if (bWasClimbing)
+	const bool wasClimbing = previousMovementMode == MOVE_Custom && previousCustomMode == CMOVE_Climbing;
+	if (wasClimbing)
 	{
 		bOrientRotationToMovement = true;
 
@@ -135,7 +140,7 @@ void UMyCharacterMovementComponent::PhysCustom(float deltaTime, int32 iterations
 	{
 		PhysClimbing(deltaTime, iterations);
 	}
-	
+
 	Super::PhysCustom(deltaTime, iterations);
 }
 
@@ -148,11 +153,7 @@ void UMyCharacterMovementComponent::UpdateClimbDashState(float deltaTime)
 
 	CurrentClimbDashTime += deltaTime;
 
-	// Better to cache it when dash starts
-	float minTime, maxTime;
-	ClimbDashCurve->GetTimeRange(minTime, maxTime);
-	
-	if (CurrentClimbDashTime >= maxTime)
+	if (CurrentClimbDashTime >= ClimbDashDuration)
 	{
 		StopClimbDashing();
 	}
@@ -166,19 +167,23 @@ void UMyCharacterMovementComponent::PhysClimbing(float deltaTime, int32 iteratio
 	}
 
 	ComputeSurfaceInfo();
-	
+
 	if (ShouldStopClimbing() || ClimbDownToFloor())
 	{
 		StopClimbing(deltaTime, iterations);
 		return;
 	}
 
+	const FVector oldLocation = UpdatedComponent->GetComponentLocation();
+	if (bIsClimbDashing == false && bIsClimbingLedge == false)
+	{
+		CurrentClimbingDirection = Acceleration.GetSafeNormal();
+	}
+
 	UpdateClimbDashState(deltaTime);
 
 	ComputeClimbingVelocity(deltaTime);
 
-	const FVector oldLocation = UpdatedComponent->GetComponentLocation();
-	
 	MoveAlongClimbingSurface(deltaTime);
 
 	TryClimbUpLedge();
@@ -187,7 +192,7 @@ void UMyCharacterMovementComponent::PhysClimbing(float deltaTime, int32 iteratio
 	{
 		Velocity = (UpdatedComponent->GetComponentLocation() - oldLocation) / deltaTime;
 	}
-	
+
 	SnapToClimbingSurface(deltaTime);
 }
 
@@ -200,22 +205,23 @@ void UMyCharacterMovementComponent::ComputeSurfaceInfo()
 	{
 		return;
 	}
-	
+
 	const FVector start = UpdatedComponent->GetComponentLocation();
 	const FCollisionShape collisionSphere = FCollisionShape::MakeSphere(6);
-	
+	constexpr float sweepDistance = 120;
+
 	for (const FHitResult& wallHit : CurrentWallHits)
 	{
-		const FVector end = start + (wallHit.ImpactPoint - start).GetSafeNormal() * 120;
-		
+		const FVector end = start + (wallHit.ImpactPoint - start).GetSafeNormal() * sweepDistance;
+
 		FHitResult AssistHit;
 		GetWorld()->SweepSingleByChannel(AssistHit, start, end, FQuat::Identity,
-		                                 ECC_WorldStatic, collisionSphere, ClimbQueryParams);
-		
+			ECC_WorldStatic, collisionSphere, ClimbQueryParams);
+
 		CurrentClimbingPosition += AssistHit.Location;
 		CurrentClimbingNormal += AssistHit.Normal;
 	}
-	
+
 	CurrentClimbingPosition /= CurrentWallHits.Num();
 	CurrentClimbingNormal = CurrentClimbingNormal.GetSafeNormal();
 }
@@ -223,15 +229,20 @@ void UMyCharacterMovementComponent::ComputeSurfaceInfo()
 bool UMyCharacterMovementComponent::ShouldStopClimbing() const
 {
 	const bool isOnCeiling = FVector::Parallel(CurrentClimbingNormal, FVector::UpVector);
-	
+
 	return bWantsToClimb == false || CurrentClimbingNormal.IsZero() || isOnCeiling;
 }
 
 void UMyCharacterMovementComponent::StopClimbing(float deltaTime, int32 iterations)
 {
 	StopClimbDashing();
+	StopClimbUpLedge();
 
 	bWantsToClimb = false;
+	CurrentClimbingNormal = FVector::ZeroVector;
+	CurrentClimbingPosition = FVector::ZeroVector;
+	CurrentClimbingDirection = FVector::ZeroVector;
+	TargetLedgePosition = FVector::ZeroVector;
 	SetMovementMode(EMovementMode::MOVE_Falling);
 	StartNewPhysics(deltaTime, iterations);
 }
@@ -244,19 +255,19 @@ bool UMyCharacterMovementComponent::ClimbDownToFloor() const
 		return false;
 	}
 
-	const bool onWalkableFloor = floorHit.Normal.Z > GetWalkableFloorZ();
-	
-	const float downSpeed = FVector::DotProduct(Velocity, -floorHit.Normal);
-	const bool isMovingTowardsFloor = downSpeed >= MaxClimbingSpeed / 3 && onWalkableFloor;
-	
-	const bool isClimbingFloor = CurrentClimbingNormal.Z > GetWalkableFloorZ();
-	
+	const bool onWalkableFloor = IsWalkable(floorHit);
+
+	const float downAcceleration = FVector::DotProduct(CurrentClimbingDirection, -floorHit.Normal);
+	const bool isMovingTowardsFloor = downAcceleration > 0.0f && onWalkableFloor;
+
+	const bool isClimbingFloor = CurrentClimbingNormal.Z >= GetWalkableFloorZ();
+
 	return isMovingTowardsFloor || (isClimbingFloor && onWalkableFloor);
 }
 
 bool UMyCharacterMovementComponent::CheckFloor(FHitResult& floorHit) const
 {
-	const FVector start = UpdatedComponent->GetComponentLocation() + (UpdatedComponent->GetUpVector() * - 20);
+	const FVector start = UpdatedComponent->GetComponentLocation() + (UpdatedComponent->GetUpVector() * -20);
 	const FVector end = start + FVector::DownVector * FloorCheckDistance;
 
 	return GetWorld()->LineTraceSingleByChannel(floorHit, start, end, ECC_WorldStatic, ClimbQueryParams);
@@ -265,44 +276,61 @@ bool UMyCharacterMovementComponent::CheckFloor(FHitResult& floorHit) const
 bool UMyCharacterMovementComponent::HasReachedEdge() const
 {
 	const UCapsuleComponent* capsule = CharacterOwner->GetCapsuleComponent();
-	const float traceDistance = capsule->GetUnscaledCapsuleRadius() * 2.5f;
+	const float traceDistance = capsule->GetUnscaledCapsuleRadius() * 2 + DistanceFromSurface;
 
-	return EyeHeightTrace(traceDistance) == false;
+	FHitResult surfaceHit;
+	return EyeHeightTrace(surfaceHit, traceDistance, LedgeEyeHeightOffset) == false || IsWalkable(surfaceHit);
 }
 
-bool UMyCharacterMovementComponent::CanMoveToLedgeClimbLocation() const
+bool UMyCharacterMovementComponent::CanMoveToLedgeClimbLocation()
 {
 	const UCapsuleComponent* capsule = CharacterOwner->GetCapsuleComponent();
+	const float baseEyeHeight = CharacterOwner->BaseEyeHeight;
+	const float eyeHeightOffset = IsClimbing() ? baseEyeHeight + ClimbingCollisionShrinkAmount + LedgeEyeHeightOffset : baseEyeHeight;
 
-	// Could use a property instead for fine-tuning.
-	const FVector verticalOffset = FVector::UpVector * 160.f;
-	const FVector horizontalOffset = UpdatedComponent->GetForwardVector() * 100.f;
+	// take steepness into account, the eyes will be closer to the ledge on a ramp than a wall as the collider is rotated
+	const FVector forward = UpdatedComponent->GetForwardVector();
+	const float upZAxis = UpdatedComponent->GetUpVector().Z;
+	// the more forwardZAxis tends towards 0 (facing a wall), the more we need to adjust horizontally based on the capsule radius
+	const float wallDistance = (1.f - FMath::Abs(forward.Z)) * (capsule->GetUnscaledCapsuleRadius() * 2 + DistanceFromSurface);
+	// the more forwardZAxis tends towards -1, the more we need to adjust horizontally based on the capsule height (to compensate for the steepness)
+	const float steepCorrection = -forward.Z * (capsule->GetUnscaledCapsuleHalfHeight() + eyeHeightOffset) * (forward.Z <= 0.f ? 1.f : 0.25f);
+	const float distanceToClimbLedge = wallDistance + steepCorrection;
 
-	const FVector checkLocation = UpdatedComponent->GetComponentLocation() + horizontalOffset + verticalOffset;
-	
-	if (IsLocationWalkable(checkLocation) == false)
+	const FVector horizontalOffset = FVector(forward.X * distanceToClimbLedge, forward.Y * distanceToClimbLedge, 0.);
+	const FVector verticalOffset = FVector::UpVector * (capsule->GetUnscaledCapsuleHalfHeight() + eyeHeightOffset * upZAxis);
+
+	TargetLedgePosition = UpdatedComponent->GetComponentLocation() + horizontalOffset + verticalOffset;
+
+	if (IsLocationWalkable(TargetLedgePosition) == false)
 	{
 		return false;
 	}
-	
-	FHitResult capsuleHit;
-	const FVector capsuleStartCheck = checkLocation - horizontalOffset;
 
-	const bool isBlocked = GetWorld()->SweepSingleByChannel(capsuleHit, capsuleStartCheck, checkLocation,
+	FHitResult capsuleHit;
+	const FVector capsuleStartCheck = TargetLedgePosition - horizontalOffset;
+
+	const bool isBlocked = GetWorld()->SweepSingleByChannel(capsuleHit, capsuleStartCheck, TargetLedgePosition,
 		FQuat::Identity, ECC_WorldStatic, capsule->GetCollisionShape(), ClimbQueryParams);
-	
-	return isBlocked == false;
+
+	return isBlocked == false || IsWalkable(capsuleHit);
 }
 
 bool UMyCharacterMovementComponent::IsLocationWalkable(const FVector& checkLocation) const
 {
-	const FVector checkEnd = checkLocation + (FVector::DownVector * 250);
+	const UCapsuleComponent* capsule = CharacterOwner->GetCapsuleComponent();
+
+	const FVector checkEnd = checkLocation + (FVector::DownVector * capsule->GetUnscaledCapsuleHalfHeight() * 1.5f);
 
 	FHitResult ledgeHit;
-	const bool hasHitLedgeGround = GetWorld()->LineTraceSingleByChannel(ledgeHit, checkLocation, checkEnd,
-	                                                                  ECC_WorldStatic, ClimbQueryParams);
+	GetWorld()->LineTraceSingleByChannel(ledgeHit, checkLocation, checkEnd,
+		ECC_WorldStatic, ClimbQueryParams);
 
-	return hasHitLedgeGround && ledgeHit.Normal.Z >= GetWalkableFloorZ();
+#if 0
+	DrawDebugDirectionalArrow(GetWorld(), checkLocation, checkEnd, 4.f, FColor::Purple, true, -1.0f, 0U, 2.f);
+#endif
+
+	return IsWalkable(ledgeHit);
 }
 
 void UMyCharacterMovementComponent::ComputeClimbingVelocity(float deltaTime)
@@ -316,7 +344,7 @@ void UMyCharacterMovementComponent::ComputeClimbingVelocity(float deltaTime)
 			AlignClimbDashDirection();
 
 			const float currentCurveSpeed = ClimbDashCurve->GetFloatValue(CurrentClimbDashTime);
-			Velocity = ClimbDashDirection * currentCurveSpeed;
+			Velocity = CurrentClimbingDirection * currentCurveSpeed;
 		}
 		else
 		{
@@ -333,15 +361,24 @@ void UMyCharacterMovementComponent::ComputeClimbingVelocity(float deltaTime)
 void UMyCharacterMovementComponent::AlignClimbDashDirection()
 {
 	const FVector horizontalSurfaceNormal = GetClimbSurfaceNormal();
-	
-	ClimbDashDirection = FVector::VectorPlaneProject(ClimbDashDirection, horizontalSurfaceNormal);
+
+	CurrentClimbingDirection = FVector::VectorPlaneProject(CurrentClimbingDirection, horizontalSurfaceNormal);
 }
 
 void UMyCharacterMovementComponent::StopClimbDashing()
 {
+	// Dirty hack to fix the dash animations offset (not in place)
+#if 0
+	if (bIsClimbDashing && bIsClimbingLedge == false)
+	{
+		FHitResult hit(1.f);
+		constexpr bool sweep = true;
+		SafeMoveUpdatedComponent(CurrentClimbingDirection * 40.f, UpdatedComponent->GetComponentQuat(), sweep, hit);
+	}
+#endif
+
 	bIsClimbDashing = false;
 	CurrentClimbDashTime = 0.f;
-	ClimbDashDirection = FVector::ZeroVector;
 }
 
 float UMyCharacterMovementComponent::GetMaxSpeed() const
@@ -357,15 +394,16 @@ float UMyCharacterMovementComponent::GetMaxAcceleration() const
 void UMyCharacterMovementComponent::MoveAlongClimbingSurface(float deltaTime)
 {
 	const FVector adjusted = Velocity * deltaTime;
-	
+
 	FHitResult hit(1.f);
-	
-	SafeMoveUpdatedComponent(adjusted, GetClimbingRotation(deltaTime), true, hit);
-	
+	constexpr bool sweep = true;
+
+	SafeMoveUpdatedComponent(adjusted, GetClimbingRotation(deltaTime), sweep, hit);
+
 	if (hit.Time < 1.f)
 	{
-		HandleImpact(hit, deltaTime, adjusted);
 		constexpr bool handleImpact = true;
+		HandleImpact(hit, deltaTime, adjusted);
 		SlideAlongSurface(adjusted, (1.f - hit.Time), hit.Normal, hit, handleImpact);
 	}
 }
@@ -378,33 +416,52 @@ FQuat UMyCharacterMovementComponent::GetClimbingRotation(float deltaTime) const
 	{
 		return current;
 	}
-	
+
 	const FQuat target = FRotationMatrix::MakeFromX(-CurrentClimbingNormal).ToQuat();
 	const float rotationSpeed = ClimbingRotationSpeed * FMath::Max(1, Velocity.Length() / MaxClimbingSpeed);
 
 	return FMath::QInterpTo(current, target, deltaTime, rotationSpeed);
 }
 
-bool UMyCharacterMovementComponent::TryClimbUpLedge() const
+bool UMyCharacterMovementComponent::TryClimbUpLedge()
 {
-	if (AnimInstance && AnimInstance->Montage_IsPlaying(LedgeClimbMontage))
+	if (bIsClimbingLedge)
 	{
+		// Finished climbing up the ledge, let's move the component (work around for animation root motion not working).
+		if (AnimInstance->Montage_IsPlaying(LedgeClimbMontage) == false)
+		{
+			UpdatedComponent->SetWorldLocation(TargetLedgePosition);
+			bIsClimbingLedge = false;
+		}
+
 		return false;
 	}
-	
-	const float upSpeed = FVector::DotProduct(Velocity, UpdatedComponent->GetUpVector());
-	const bool isMovingUp = upSpeed >= MaxClimbingSpeed / 3;
-	
+
+	const float upAcceleration = FVector::DotProduct(CurrentClimbingDirection, UpdatedComponent->GetUpVector());
+	const bool isMovingUp = upAcceleration > 0.0f;
+
 	if (isMovingUp && HasReachedEdge() && CanMoveToLedgeClimbLocation())
 	{
+		bIsClimbingLedge = true;
+		StopClimbDashing();
+
 		SetRotationToStand();
-		
 		AnimInstance->Montage_Play(LedgeClimbMontage);
-		
+
 		return true;
 	}
-	
+
 	return false;
+}
+
+void UMyCharacterMovementComponent::StopClimbUpLedge()
+{
+	if (bIsClimbingLedge)
+	{
+		AnimInstance->Montage_Stop(0.f, LedgeClimbMontage);
+		TargetLedgePosition = FVector::ZeroVector;
+		bIsClimbingLedge = false;
+	}
 }
 
 void UMyCharacterMovementComponent::SnapToClimbingSurface(float deltaTime) const
@@ -412,15 +469,15 @@ void UMyCharacterMovementComponent::SnapToClimbingSurface(float deltaTime) const
 	const FVector forward = UpdatedComponent->GetForwardVector();
 	const FVector location = UpdatedComponent->GetComponentLocation();
 	const FQuat rotation = UpdatedComponent->GetComponentQuat();
-	
+
 	const FVector forwardDifference = (CurrentClimbingPosition - location).ProjectOnTo(forward);
-	
+
 	const FVector offset = -CurrentClimbingNormal * (forwardDifference.Length() - DistanceFromSurface);
 
 	constexpr bool sweep = true;
 
-	const float SnapSpeed = ClimbingSnapSpeed * ((Velocity.Length() / MaxClimbingSpeed) + 1);
-	UpdatedComponent->MoveComponent(offset * SnapSpeed * deltaTime, rotation, sweep);
+	const float snapSpeed = ClimbingSnapSpeed * FMath::Max(1, Velocity.Length() / MaxClimbingSpeed);
+	UpdatedComponent->MoveComponent(offset * snapSpeed * deltaTime, rotation, sweep);
 }
 
 void UMyCharacterMovementComponent::TryClimbing()
@@ -433,28 +490,33 @@ void UMyCharacterMovementComponent::TryClimbing()
 
 void UMyCharacterMovementComponent::TryClimbDashing()
 {
-	if (ClimbDashCurve && bIsClimbDashing == false)
+	if (ClimbDashDuration > 0.f && IsClimbing() && bIsClimbDashing == false && bIsClimbingLedge == false)
 	{
 		bIsClimbDashing = true;
 		CurrentClimbDashTime = 0.f;
-		
+
 		StoreClimbDashDirection();
 	}
 }
 
 void UMyCharacterMovementComponent::StoreClimbDashDirection()
 {
-	ClimbDashDirection = UpdatedComponent->GetUpVector();
+	CurrentClimbingDirection = UpdatedComponent->GetUpVector();
 
 	const float accelerationThreshold = MaxClimbingAcceleration / 10;
 	if (Acceleration.Length() > accelerationThreshold)
 	{
-		ClimbDashDirection = Acceleration.GetSafeNormal();
+		CurrentClimbingDirection = Acceleration.GetSafeNormal();
 	}
 }
 
-void UMyCharacterMovementComponent::CancelClimbing()
+void UMyCharacterMovementComponent::CancelClimbing(bool ignoreAnimations)
 {
+	if (ignoreAnimations == false && (bIsClimbDashing || bIsClimbingLedge))
+	{
+		return;
+	}
+
 	bWantsToClimb = false;
 }
 
@@ -463,9 +525,9 @@ FVector UMyCharacterMovementComponent::GetClimbSurfaceNormal() const
 	return CurrentClimbingNormal;
 }
 
-FVector UMyCharacterMovementComponent::GetClimbDashDirection() const
+FVector UMyCharacterMovementComponent::GetClimbingDirection() const
 {
-	return ClimbDashDirection;
+	return CurrentClimbingDirection;
 }
 
 bool UMyCharacterMovementComponent::IsClimbing() const
@@ -476,4 +538,9 @@ bool UMyCharacterMovementComponent::IsClimbing() const
 bool UMyCharacterMovementComponent::IsClimbDashing() const
 {
 	return IsClimbing() && bIsClimbDashing;
+}
+
+bool UMyCharacterMovementComponent::IsClimbingLedge() const
+{
+	return IsClimbing() && bIsClimbingLedge;
 }
