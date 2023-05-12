@@ -4,14 +4,24 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Character.h"
+#include "InputActionValue.h"
 #include "ClimbingSystemCharacter.generated.h"
+
+class UCameraComponent;
+class UInputAction;
+class UInputComponent;
+class UInputMappingContext;
+class USpringArmComponent;
+class UMyCharacterMovementComponent;
 
 UCLASS(config=Game)
 class AClimbingSystemCharacter : public ACharacter
 {
-	GENERATED_UCLASS_BODY()
+	GENERATED_BODY()
 
 public:
+	AClimbingSystemCharacter(const FObjectInitializer& objectInitializer = FObjectInitializer::Get());
+
 	/** Dash if currently climbing, otherwise jump. */
 	void Jump() override;
 
@@ -19,52 +29,55 @@ public:
 	virtual void Climb();
 
 	/** Returns CameraBoom subobject **/
-	FORCEINLINE class USpringArmComponent* GetCameraBoom() const { return CameraBoom; }
+	FORCEINLINE USpringArmComponent* GetCameraBoom() const;
 
 	/** Returns FollowCamera subobject **/
-	FORCEINLINE class UCameraComponent* GetFollowCamera() const { return FollowCamera; }
+	FORCEINLINE UCameraComponent* GetFollowCamera() const;
 
 	/** Returns MovementComponent subobject **/
-	UFUNCTION(BlueprintPure)
-		FORCEINLINE class UMyCharacterMovementComponent* GetMyCharacterMovement() const { return MovementComponent; }
+	FORCEINLINE UMyCharacterMovementComponent* GetMyCharacterMovement() const;
 
 protected:
-	/** Called for forwards/backward input */
-	void MoveForward(float value);
-
-	/** Called for side to side input */
-	void MoveRight(float value);
-
-	/** 
-	 * Called via input to turn at a given rate. 
-	 * @param Rate	This is a normalized rate, i.e. 1.0 means 100% of desired turn rate
-	 */
-	void TurnAtRate(float rate);
-
-	/**
-	 * Called via input to turn look up/down at a given rate. 
-	 * @param Rate	This is a normalized rate, i.e. 1.0 means 100% of desired turn rate
-	 */
-	void LookUpAtRate(float rate);
-
 	// APawn interface
-	virtual void SetupPlayerInputComponent(class UInputComponent* playerInputComponent) override;
+	virtual void SetupPlayerInputComponent(UInputComponent* playerInputComponent) override;
 	// End of APawn interface
 
 private:
-	UPROPERTY()
-	class UMyCharacterMovementComponent* MovementComponent;
+	/** Called for movement input */
+	void Move(const FInputActionValue& value);
+
+	/** Called for looking input */
+	void Look(const FInputActionValue& value);
+
+	/** Movement component handling the character's climbing mechanic */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = Component, meta = (AllowPrivateAccess = "true"))
+		UMyCharacterMovementComponent* MovementComponent;
 
 	/** Camera boom positioning the camera behind the character */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = Camera, meta = (AllowPrivateAccess = "true"))
-		class USpringArmComponent* CameraBoom;
+		TObjectPtr<USpringArmComponent> CameraBoom;
 
 	/** Follow camera */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = Camera, meta = (AllowPrivateAccess = "true"))
-		class UCameraComponent* FollowCamera;
+		TObjectPtr<UCameraComponent> FollowCamera;
 
-	/** Base turn rate, in deg/sec. Other scaling may affect final turn rate. */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = Input, meta = (AllowPrivateAccess = "true"))
-		float TurnRateGamepad;
+	/** Input Mapping Context */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = Input, meta = (AllowPrivateAccess = "true"))
+		TObjectPtr<UInputMappingContext> DefaultMappingContext;
 
+	/** Move Input Action */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = Input, meta = (AllowPrivateAccess = "true"))
+		TObjectPtr<UInputAction> MoveAction;
+
+	/** Look Input Action */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = Input, meta = (AllowPrivateAccess = "true"))
+		TObjectPtr<UInputAction> LookAction;
+
+	/** Jump Input Action */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = Input, meta = (AllowPrivateAccess = "true"))
+		TObjectPtr<UInputAction> JumpAction;
+
+	/** Sprint Input Action */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = Input, meta = (AllowPrivateAccess = "true"))
+		TObjectPtr<UInputAction> ClimbAction;
 };

@@ -4,6 +4,21 @@
 #include "Components/CapsuleComponent.h"
 #include "GameFramework/Character.h"
 
+UMyCharacterMovementComponent::UMyCharacterMovementComponent()
+{
+	// Configure character movement
+	bOrientRotationToMovement = true; // Character moves in the direction of input...
+	RotationRate = FRotator(0.0f, 500.0f, 0.0f); // ...at this rotation rate
+
+	// Note: For faster iteration times these variables, and many more, can be tweaked in the Character Blueprint
+	// instead of recompiling to adjust them
+	JumpZVelocity = 550.f;
+	AirControl = 0.35f;
+	MaxWalkSpeed = 500.f;
+	MinAnalogWalkSpeed = 20.f;
+	BrakingDecelerationWalking = 2000.f;
+}
+
 void UMyCharacterMovementComponent::BeginPlay()
 {
 	Super::BeginPlay();

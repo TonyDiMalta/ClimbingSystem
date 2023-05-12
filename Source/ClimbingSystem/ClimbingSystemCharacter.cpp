@@ -8,6 +8,8 @@
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/Controller.h"
 #include "GameFramework/SpringArmComponent.h"
+#include "EnhancedInputComponent.h"
+#include "EnhancedInputSubsystems.h"
 #include "MyCharacterMovementComponent.h"
 
 //////////////////////////////////////////////////////////////////////////
@@ -19,25 +21,10 @@ AClimbingSystemCharacter::AClimbingSystemCharacter(const FObjectInitializer& obj
 	// Set size for collision capsule
 	GetCapsuleComponent()->InitCapsuleSize(42.f, 96.0f);
 
-	// Set our turn rate for input
-	TurnRateGamepad = 50.f;
-
 	// Don't rotate when the controller rotates. Let that just affect the camera.
 	bUseControllerRotationPitch = false;
 	bUseControllerRotationYaw = false;
 	bUseControllerRotationRoll = false;
-
-	// Configure character movement
-	GetCharacterMovement()->bOrientRotationToMovement = true; // Character moves in the direction of input...	
-	GetCharacterMovement()->RotationRate = FRotator(0.0f, 500.0f, 0.0f); // ...at this rotation rate
-
-	// Note: For faster iteration times these variables, and many more, can be tweaked in the Character Blueprint
-	// instead of recompiling to adjust them
-	GetCharacterMovement()->JumpZVelocity = 700.f;
-	GetCharacterMovement()->AirControl = 0.35f;
-	GetCharacterMovement()->MaxWalkSpeed = 500.f;
-	GetCharacterMovement()->MinAnalogWalkSpeed = 20.f;
-	GetCharacterMovement()->BrakingDecelerationWalking = 2000.f;
 
 	// Create a camera boom (pulls in towards the player if there is a collision)
 	CameraBoom = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraBoom"));
@@ -56,6 +43,21 @@ AClimbingSystemCharacter::AClimbingSystemCharacter(const FObjectInitializer& obj
 	// are set in the derived blueprint asset named ThirdPersonCharacter (to avoid direct content references in C++)
 }
 
+USpringArmComponent* AClimbingSystemCharacter::GetCameraBoom() const
+{
+	return CameraBoom;
+}
+
+UCameraComponent* AClimbingSystemCharacter::GetFollowCamera() const
+{
+	return FollowCamera;
+}
+
+UMyCharacterMovementComponent* AClimbingSystemCharacter::GetMyCharacterMovement() const
+{
+	return MovementComponent;
+}
+
 //////////////////////////////////////////////////////////////////////////
 // Input
 
@@ -63,22 +65,33 @@ void AClimbingSystemCharacter::SetupPlayerInputComponent(class UInputComponent* 
 {
 	// Set up gameplay key bindings
 	check(playerInputComponent);
-	playerInputComponent->BindAction("Jump", IE_Pressed, this, &ThisClass::Jump);
-	playerInputComponent->BindAction("Jump", IE_Released, this, &ThisClass::StopJumping);
+	if (UEnhancedInputComponent* enhancedInputComponent = CastChecked<UEnhancedInputComponent>(playerInputComponent))
+	{
+		//Moving
+		enhancedInputComponent->BindAction(MoveAction, ETriggerEvent::Triggered, this, &ThisClass::Move);
 
-	playerInputComponent->BindAxis("Move Forward / Backward", this, &ThisClass::MoveForward);
-	playerInputComponent->BindAxis("Move Right / Left", this, &ThisClass::MoveRight);
+		//Looking
+		enhancedInputComponent->BindAction(LookAction, ETriggerEvent::Triggered, this, &ThisClass::Look);
 
-	// We have 2 versions of the rotation bindings to handle different kinds of devices differently
-	// "turn" handles devices that provide an absolute delta, such as a mouse.
-	// "turnrate" is for devices that we choose to treat as a rate of change, such as an analog joystick
-	playerInputComponent->BindAxis("Turn Right / Left Mouse", this, &ThisClass::AddControllerYawInput);
-	playerInputComponent->BindAxis("Turn Right / Left Gamepad", this, &ThisClass::TurnAtRate);
-	playerInputComponent->BindAxis("Look Up / Down Mouse", this, &ThisClass::AddControllerPitchInput);
-	playerInputComponent->BindAxis("Look Up / Down Gamepad", this, &ThisClass::LookUpAtRate);
+		//Jumping
+		enhancedInputComponent->BindAction(JumpAction, ETriggerEvent::Triggered, this, &ThisClass::Jump);
+		enhancedInputComponent->BindAction(JumpAction, ETriggerEvent::Completed, this, &ThisClass::StopJumping);
 
-	// handle climbing
-	playerInputComponent->BindAction("Climb", IE_Pressed, this, &ThisClass::Climb);
+		//Climbing
+		enhancedInputComponent->BindAction(ClimbAction, ETriggerEvent::Triggered, this, &ThisClass::Climb);
+
+		// Set up input mappings
+		check(Controller);
+		if (APlayerController* playerController = Cast<APlayerController>(Controller))
+		{
+			if (UEnhancedInputLocalPlayerSubsystem* subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(playerController->GetLocalPlayer()))
+			{
+				// Clear out existing mapping, and add our mapping
+				subsystem->ClearAllMappings();
+				subsystem->AddMappingContext(DefaultMappingContext, 0);
+			}
+		}
+	}
 }
 
 void AClimbingSystemCharacter::Jump()
@@ -105,21 +118,9 @@ void AClimbingSystemCharacter::Climb()
 	}
 }
 
-void AClimbingSystemCharacter::TurnAtRate(float rate)
+void AClimbingSystemCharacter::Move(const FInputActionValue& value)
 {
-	// calculate delta for this frame from the rate information
-	AddControllerYawInput(rate * TurnRateGamepad * GetWorld()->GetDeltaSeconds());
-}
-
-void AClimbingSystemCharacter::LookUpAtRate(float rate)
-{
-	// calculate delta for this frame from the rate information
-	AddControllerPitchInput(rate * TurnRateGamepad * GetWorld()->GetDeltaSeconds());
-}
-
-void AClimbingSystemCharacter::MoveForward(float value)
-{
-	if ((Controller != nullptr) && (value != 0.0f))
+	if (Controller != nullptr)
 	{
 		// block movement inputs while running animated movements
 		if (MovementComponent->IsClimbDashing() || MovementComponent->IsClimbingLedge())
@@ -127,52 +128,61 @@ void AClimbingSystemCharacter::MoveForward(float value)
 			return;
 		}
 
-		// find out which way is forward
-		const FRotator rotation = Controller->GetControlRotation();
-		const FRotator yawRotation(0, rotation.Yaw, 0);
+		const FVector2D moveValue = value.Get<FVector2D>();
+		const FRotator movementRotation(0, Controller->GetControlRotation().Yaw, 0);
 
-		// get forward vector
-		FVector direction;
-		if (MovementComponent->IsClimbing())
+		// Forward/Backward direction
+		if (moveValue.Y != 0.f)
 		{
-			direction = FVector::CrossProduct(MovementComponent->GetClimbSurfaceNormal(), -GetActorRightVector());
-		}
-		else
-		{
-			direction = FRotationMatrix(yawRotation).GetUnitAxis(EAxis::X);
+			// get forward vector
+			FVector direction;
+			if (MovementComponent->IsClimbing())
+			{
+				direction = FVector::CrossProduct(MovementComponent->GetClimbSurfaceNormal(), -GetActorRightVector());
+			}
+			else
+			{
+				direction = movementRotation.RotateVector(FVector::ForwardVector);
+			}
+
+			// add movement in that direction
+			AddMovementInput(direction, moveValue.Y);
 		}
 
-		// add movement in that direction
-		AddMovementInput(direction, value);
+		// Right/Left direction
+		if (moveValue.X != 0.f)
+		{
+			// Get right vector
+			FVector direction;
+			if (MovementComponent->IsClimbing())
+			{
+				direction = FVector::CrossProduct(MovementComponent->GetClimbSurfaceNormal(), GetActorUpVector());
+			}
+			else
+			{
+				direction = movementRotation.RotateVector(FVector::RightVector);
+			}
+
+			// add movement in that direction
+			AddMovementInput(direction, moveValue.X);
+		}
 	}
 }
 
-void AClimbingSystemCharacter::MoveRight(float value)
+void AClimbingSystemCharacter::Look(const FInputActionValue& value)
 {
-	if ((Controller != nullptr) && (value != 0.0f))
+	if (Controller != nullptr)
 	{
-		// block movement inputs while running animated movements
-		if (MovementComponent->IsClimbDashing() || MovementComponent->IsClimbingLedge())
+		const FVector2D lookValue = value.Get<FVector2D>();
+
+		if (lookValue.X != 0.f)
 		{
-			return;
+			AddControllerYawInput(lookValue.X);
 		}
 
-		// find out which way is right
-		const FRotator rotation = Controller->GetControlRotation();
-		const FRotator yawRotation(0, rotation.Yaw, 0);
-	
-		// get right vector
-		FVector direction;
-		if (MovementComponent->IsClimbing())
+		if (lookValue.Y != 0.f)
 		{
-			direction = FVector::CrossProduct(MovementComponent->GetClimbSurfaceNormal(), GetActorUpVector());
+			AddControllerPitchInput(lookValue.Y);
 		}
-		else
-		{
-			direction = FRotationMatrix(yawRotation).GetUnitAxis(EAxis::Y);
-		}
-
-		// add movement in that direction
-		AddMovementInput(direction, value);
 	}
 }

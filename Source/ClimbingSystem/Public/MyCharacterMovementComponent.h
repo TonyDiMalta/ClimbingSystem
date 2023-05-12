@@ -11,6 +11,8 @@ class CLIMBINGSYSTEM_API UMyCharacterMovementComponent : public UCharacterMoveme
 	GENERATED_BODY()
 
 public:
+	UMyCharacterMovementComponent();
+
 	UFUNCTION(BlueprintPure)
 	bool IsClimbing() const;
 
